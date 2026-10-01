@@ -1,5 +1,5 @@
 // 离线缓存。发布新版时改 VERSION，旧缓存会被清掉。
-const VERSION = 'v3';
+const VERSION = 'v4';
 const FILES = [
   './',
   'index.html',
@@ -14,6 +14,7 @@ const FILES = [
   'src/core/traps.js',
   'src/core/session.js',
   'src/core/progress.js',
+  'src/core/hint.js',
   'src/ui/fx.js',
 ];
 

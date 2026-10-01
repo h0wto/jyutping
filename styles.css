@@ -191,6 +191,17 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 .ex { display: flex; flex-wrap: wrap; gap: 6px; }
 .ex span { font-size: 14px; padding: 4px 8px; border-radius: 8px; background: var(--paper); border: 1px solid var(--line); }
 .ex span code { font-family: var(--mono); font-weight: 700; color: var(--green); margin-left: 4px; }
+.note.sub { font-size: 14px; margin-top: 6px; line-height: 1.6; }
+.note.mine { margin: 8px auto 10px; width: fit-content; padding: 4px 12px; border-radius: 999px; background: var(--red-soft); color: var(--red); font-weight: 700; font-size: 14px; }
+.note + .card, .note.mine + .card { margin-top: 12px; }
+.mine-list { margin-bottom: 14px; border-color: var(--red); box-shadow: 0 4px 0 var(--red); animation: none; }
+.mine-list .kicker { color: var(--red); }
+.mine-list ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.mine-list li { font-size: 15px; line-height: 1.5; }
+.mine-list li b { font-family: var(--mono); }
+.mine-list .times { float: right; font-weight: 900; color: var(--red); }
+.mine-list small { color: var(--ink-soft); font-size: 13px; }
+.mine-list code { font-family: var(--mono); color: var(--green); font-weight: 700; }
 .kbd { position: absolute; opacity: 0; left: 0; top: 30%; width: 100%; height: 44px; font-size: 16px; border: 0; padding: 0; caret-color: transparent; }
 .tap-hint { margin-top: auto; padding: 14px 0; text-align: center; font-size: 13px; color: var(--ink-soft); }
 

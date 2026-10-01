@@ -1,5 +1,6 @@
 import { UNITS } from './data/units.js';
 import { TRAPS } from './core/traps.js';
+import { diagnose, buildExamples } from './core/hint.js';
 import { createSession, submit, summary, current, progress, toItem, isDone } from './core/session.js';
 import {
   emptyState, applyResult, streak, dayKey, addDays, isUnlocked, nextLevel, dueReviews, flatLevels, DAILY_GOAL_XP,
@@ -10,6 +11,7 @@ import { sfx, unlockAudio, setSound, speak, confetti, vibrate } from './ui/fx.js
 const STORE_KEY = 'jyutping-daily:v1';
 const app = document.getElementById('app');
 const LEVELS = flatLevels(UNITS);
+const EXAMPLES = buildExamples(UNITS);
 
 // ---------- 存档 ----------
 function load() {
@@ -343,16 +345,27 @@ function play({ items, mode, level, resume = null }) {
     sfx.wrong();
     vibrate([30, 40, 30]);
     if (ev.trap) trapHits.push(ev.trap);
-    if (ev.type === 'reveal') {
-      revealAnswer = ev.answer;
-      coachHtml = (ev.trap ? trapCard(ev.trap, '记住这条') : '') +
-        `<p class="note">正确是 <b>${esc(ev.answer)}</b>，照住打一次</p>`;
-    } else if (ev.trap) {
-      coachHtml = trapCard(ev.trap, state.seenTraps.includes(ev.trap) ? '又踩到这个坑' : '新规则');
-      if (!state.seenTraps.includes(ev.trap)) { state.seenTraps.push(ev.trap); save(); }
+    if (mode === 'ime') {
+      revealAnswer = ev.type === 'reveal' ? ev.answer : null;
+      coachHtml = `<p class="note">${ev.type === 'reveal' ? '睇住下面嘅粤拼再打一次' : '有字唔啱，再睇清楚'}</p>`;
     } else {
-      const ans = mode === 'ime' ? '' : current(s).syls[ev.sylIndex];
-      coachHtml = `<p class="note">${mode === 'ime' ? '有字唔啱，再睇清楚' : ans[0] === ev.typed[0] ? '开头啱咗，后面再谂谂' : '唔啱，再试吓'}</p>`;
+      // 按实际打错的部位给提示；同一种混淆犯多了单独提醒
+      const d = diagnose(ev.typed, current(s).syls[ev.sylIndex], EXAMPLES, [...current(s).zh][ev.sylIndex]);
+      if (ev.type === 'wrong' && d.pair) { state.confusions[d.pair] = (state.confusions[d.pair] ?? 0) + 1; save(); }
+      const times = d.pair ? state.confusions[d.pair] ?? 0 : 0;
+      const [tf, af] = d.pair?.split('>') ?? [];
+      const mine = times >= 2 ? `<p class="note mine">📌 你已经第 ${times} 次将 -${esc(af)} 打成 -${esc(tf)}</p>` : '';
+      let card = '';
+      if (ev.trap) {
+        card = trapCard(ev.trap, ev.type === 'reveal' ? '记住这条' : state.seenTraps.includes(ev.trap) ? '又踩到这个坑' : '新规则');
+        if (!state.seenTraps.includes(ev.trap)) { state.seenTraps.push(ev.trap); save(); }
+      }
+      if (ev.type === 'reveal') {
+        revealAnswer = ev.answer;
+        coachHtml = `<p class="note">正确是 <b>${esc(ev.answer)}</b>，照住打一次</p><p class="note sub">${esc(d.reveal)}</p>${mine}${card}`;
+      } else {
+        coachHtml = `<p class="note">${esc(d.line)}</p>${mine}${card}`;
+      }
     }
     if (mode === 'ime') {
       input.classList.remove('bad'); void input.offsetWidth; input.classList.add('bad');
@@ -442,6 +455,7 @@ function renderResult({ sum, gained, level, items }) {
 
 // ---------- 规则手册 ----------
 function renderRules() {
+  const mine = Object.entries(state.confusions).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const cards = Object.keys(TRAPS).map((id) => {
     const hits = state.trapHits[id] ?? 0;
     return trapCard(id, hits ? `你踩过 ${hits} 次` : state.seenTraps.includes(id) ? '已见过' : '规则', hits ? 'hit' : '');
@@ -449,6 +463,13 @@ function renderRules() {
   app.innerHTML = `
     <div class="page-head"><button class="icon-btn" data-back>←</button><h2>规则手册</h2></div>
     <p class="fine">你本身识讲广东话，只需要记住拼写上和普通话拼音唔同嘅地方。</p>
+    ${mine.length ? `<div class="card mine-list"><div class="kicker">你嘅易错点</div><h4>最常混淆嘅韵母</h4>
+      <ul>${mine.map(([pair, n]) => {
+        const [tf, af] = pair.split('>');
+        const eg = (f) => (EXAMPLES[f] ?? []).slice(0, 2).map(([c, syl]) => `${esc(c)} <code>${esc(syl)}</code>`).join('、');
+        return `<li><b>-${esc(af)}</b> 打成 <b>-${esc(tf)}</b> <span class="times">×${n}</span><br>
+          <small>啱：${eg(af) || '—'}${eg(tf) ? `　你打嘅：${eg(tf)}` : '（粤拼冇呢个韵母）'}</small></li>`;
+      }).join('')}</ul></div>` : ''}
     <div class="rules">${cards}</div>`;
   app.querySelector('[data-back]').onclick = renderHome;
   scrollTo(0, 0);

@@ -19,6 +19,7 @@ export function emptyState() {
     review: {},       // itemKey -> { due, jp }：错题本，一次打对就移除
     seenTraps: [],    // 已经弹过的陷阱卡
     trapHits: {},     // trapId -> 次数
+    confusions: {},   // '打的韵母>正确韵母' -> 次数，例如 'ei>ai'
     settings: { lengthHint: false, sound: true, speak: false, rubricClosed: false },
   };
 }
