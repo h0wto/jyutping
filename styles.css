@@ -95,6 +95,7 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 .week i.today-mark { color: var(--ink); font-weight: 800; }
 
 .cta { margin: 4px 0 8px; }
+.link { display: block; margin: 10px auto 0; font-size: 14px; font-weight: 700; color: var(--ink-soft); text-decoration: underline; text-underline-offset: 3px; }
 .cta-sub { text-align: center; color: var(--ink-soft); font-size: 13px; margin: 8px 0 20px; }
 
 .unit { margin: 26px 0 8px; }

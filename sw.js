@@ -1,5 +1,5 @@
 // 离线缓存。发布新版时改 VERSION，旧缓存会被清掉。
-const VERSION = 'v1';
+const VERSION = 'v2';
 const FILES = [
   './',
   'index.html',

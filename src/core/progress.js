@@ -26,11 +26,11 @@ export function addDays(key, n) {
   return dayKey(new Date(y, m - 1, d + n));
 }
 
+// 错的字都要重打对才能结束一局，所以打完就算过关（至少 1 星），星数只看一次打对的比例。
 export function starsFor(accuracy) {
   if (accuracy >= 0.97) return 3;
   if (accuracy >= 0.9) return 2;
-  if (accuracy >= 0.8) return 1;
-  return 0;
+  return 1;
 }
 
 // 每个字首次打对 1 分，满连击奖励，过关再加。

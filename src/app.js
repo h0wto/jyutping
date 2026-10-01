@@ -1,6 +1,6 @@
 import { UNITS } from './data/units.js';
 import { TRAPS } from './core/traps.js';
-import { createSession, submit, summary, current, progress, toItem } from './core/session.js';
+import { createSession, submit, summary, current, progress, toItem, isDone } from './core/session.js';
 import {
   emptyState, applyResult, streak, dayKey, addDays, isUnlocked, nextLevel, dueReviews, flatLevels, DAILY_GOAL_XP,
 } from './core/progress.js';
@@ -22,6 +22,25 @@ function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {}
 }
 let state = load();
+
+// 打到一半的那局单独存一份：iOS 会把切到后台的主屏幕 App 直接重启，回来要能接着打。
+const RUN_KEY = 'jyutping-daily:run';
+function loadRun() {
+  try {
+    const run = JSON.parse(localStorage.getItem(RUN_KEY));
+    if (run && Date.now() - run.savedAt < 2 * 86400000 && (run.levelId === null || LEVELS.some((l) => l.id === run.levelId))) return run;
+  } catch {}
+  return null;
+}
+function saveRun(run) {
+  try { localStorage.setItem(RUN_KEY, JSON.stringify(run)); } catch {}
+}
+function clearRun() {
+  try { localStorage.removeItem(RUN_KEY); } catch {}
+}
+function resumeRun(run) {
+  play({ items: run.items, mode: run.mode, level: LEVELS.find((l) => l.id === run.levelId) ?? null, resume: run });
+}
 setSound(state.settings.sound);
 navigator.storage?.persist?.();
 
@@ -69,6 +88,8 @@ function renderHome() {
   const st = streak(state, today);
   const next = nextLevel(state, UNITS);
   const due = dueReviews(state, today, 99).length;
+  const run = loadRun();
+  const runLevel = run?.levelId ? LEVELS.find((l) => l.id === run.levelId) : null;
   const week = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
   const wd = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -109,7 +130,9 @@ function renderHome() {
         <div class="week">${week.map((d) => `<i class="${state.xpByDay[d] ? 'done' : ''} ${d === today ? 'today-mark' : ''}">${wd[new Date(d + 'T00:00').getDay()]}</i>`).join('')}</div>
       </div>
     </div>
-    <div class="cta"><button class="btn" data-go="daily">开始今日练习 <small>· ${esc(next.unit.title)} 第 ${levelNo(next)} 关</small></button></div>
+    ${run ? `<div class="cta"><button class="btn" data-go="resume">继续上次 <small>· ${runLevel ? `${esc(runLevel.unit.title)} 第 ${levelNo(runLevel)} 关` : '复习'} · ${Math.round(progress(run.s) * run.s.total)}/${run.s.total}</small></button>
+      <button class="link" data-go="discard">放弃这一局</button></div>` : ''}
+    <div class="cta"><button class="btn ${run ? 'ghost' : ''}" data-go="daily">开始今日练习 <small>· ${esc(next.unit.title)} 第 ${levelNo(next)} 关</small></button></div>
     <p class="cta-sub">${due ? `另有 ${due} 个错字到期复习，会混在这局里` : '每局约 5 分钟 · 打完一个音节按空格'}</p>
     ${due > 6 ? `<button class="btn ghost" data-go="review">只练复习（${due}）</button>` : ''}
     ${unitsHtml}
@@ -120,6 +143,8 @@ function renderHome() {
 
   app.querySelector('[data-go="daily"]').onclick = () => startLevel(next, true);
   app.querySelector('[data-go="review"]')?.addEventListener('click', startReview);
+  app.querySelector('[data-go="resume"]')?.addEventListener('click', () => { unlockAudio(); resumeRun(run); });
+  app.querySelector('[data-go="discard"]')?.addEventListener('click', () => { clearRun(); renderHome(); });
   app.querySelector('[data-go="rules"]').onclick = renderRules;
   app.querySelector('[data-go="settings"]').onclick = renderSettings;
   app.querySelectorAll('[data-level]').forEach((b) => (b.onclick = () => startLevel(LEVELS.find((l) => l.id === b.dataset.level), false)));
@@ -166,9 +191,19 @@ function startReview() {
 }
 
 // ---------- 练习 ----------
-function play({ items, mode, level }) {
-  const s = createSession(items, { mode });
-  const trapHits = [];
+function play({ items, mode, level, resume = null }) {
+  const s = resume ? resume.s : createSession(items, { mode });
+  const trapHits = resume?.trapHits ?? [];
+  if (resume) {
+    s.startedAt = Date.now() - resume.elapsed; // 离开的时间不算进速度
+    s.attempts = 0;
+    s.revealed = false;
+  }
+  const persist = () => {
+    if (isDone(s)) return;
+    saveRun({ levelId: level?.id ?? null, mode, items, s, trapHits, elapsed: Date.now() - s.startedAt, savedAt: Date.now() });
+  };
+  persist();
   let coachHtml = '';
   let flash = null; // { sylIndex, cls, text }
   let revealAnswer = null;
@@ -187,9 +222,8 @@ function play({ items, mode, level }) {
   const stage = app.querySelector('#stage');
   const barFill = app.querySelector('.bar i');
   const comboEl = app.querySelector('.combo');
-  app.querySelector('[data-quit]').onclick = () => {
-    if (s.pos === 0 || confirm('退出这一局？进度不会保存。')) renderHome();
-  };
+  // 退出不丢进度，首页会出现「继续上次」。
+  app.querySelector('[data-quit]').onclick = () => { input.blur(); renderHome(); };
 
   let input;
   if (mode === 'ime') {
@@ -265,6 +299,11 @@ function play({ items, mode, level }) {
   }
 
   function handle(ev) {
+    react(ev);
+    persist();
+  }
+
+  function react(ev) {
     if (ev.type === 'ignored') return;
     if (ev.type === 'correct') {
       revealAnswer = null;
@@ -327,6 +366,7 @@ function play({ items, mode, level }) {
     const res = applyResult(state, { levelId: level?.id ?? null, summary: sum, items, trapHits }, dayKey());
     state = res.state;
     save();
+    clearRun();
     input.blur();
     renderResult({ sum, gained: res.gained, level, items });
   }
@@ -346,7 +386,7 @@ function renderResult({ sum, gained, level, items }) {
   if (gained.streakStarted) badges.push(['🔥', gained.streak > 1 ? `连续 ${gained.streak} 日！` : '连胜开始！明天再嚟', true]);
   if (gained.newSpmRecord) badges.push(['⚡', `速度新纪录：每分钟 ${sum.spm} 个音节`, true]);
   if (sum.maxCombo >= 10) badges.push(['🎵', `最长连击 ${sum.maxCombo}`, false]);
-  if (level && gained.stars === 0) badges.push(['💪', '正确率 80% 就过关，错字已经记住咗', false]);
+
 
   app.innerHTML = `
     <div class="result">
@@ -409,6 +449,7 @@ function renderSettings() {
     <div class="page-head"><button class="icon-btn" data-back>←</button><h2>设置</h2></div>
     ${rows.map(([k, t, d]) => `<div class="setting"><div><b>${t}</b><p>${d}</p></div><button class="switch" role="switch" aria-checked="${state.settings[k]}" data-k="${k}" aria-label="${t}"></button></div>`).join('')}
     <p class="fine">装到主屏幕：用 Safari 打开 → 分享 → 「添加到主屏幕」，之后离线也能用。<br>
+    进度存在这部手机里。注意：Safari 网页和主屏幕图标的进度是<b>分开</b>的，建议固定只用主屏幕图标打开。<br>
     打字前先在 设置 → 通用 → 键盘 → 键盘 → 添加新键盘 里加上「粵語（香港）」的「粵拼 — 全鍵盤」，实战关要用。</p>
     <button class="btn red" data-reset style="margin-top:20px">清空所有进度</button>`;
   app.querySelector('[data-back]').onclick = renderHome;
@@ -425,7 +466,10 @@ function renderSettings() {
 }
 
 document.addEventListener('pointerdown', unlockAudio, { once: true });
-renderHome();
+// 最近半小时内打到一半（多半是被 iOS 切后台重启了），直接接着打。
+const pending = loadRun();
+if (pending && Date.now() - pending.savedAt < 30 * 60000) resumeRun(pending);
+else renderHome();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js');

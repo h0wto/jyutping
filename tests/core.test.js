@@ -71,7 +71,7 @@ test('星级、解锁、打卡和错题复习', () => {
   assert.equal(starsFor(1), 3);
   assert.equal(starsFor(0.92), 2);
   assert.equal(starsFor(0.8), 1);
-  assert.equal(starsFor(0.5), 0);
+  assert.equal(starsFor(0.5), 1);
 
   const units = [{ id: 'u1', levels: [{ id: 'a', items: [] }, { id: 'b', items: [] }] }];
   let st = emptyState();
@@ -82,15 +82,15 @@ test('星级、解锁、打卡和错题复习', () => {
   const sum = { total: 2, firstTry: 1, accuracy: 0.5, maxCombo: 1, spm: 20, missedKeys: ['一'], clearedKeys: ['十'] };
   let res = applyResult(st, { levelId: 'a', summary: sum, items }, '2026-09-27');
   st = res.state;
-  assert.equal(res.gained.stars, 0);
-  assert.equal(isUnlocked(st, units, 'b'), false);
+  assert.equal(res.gained.stars, 1);
+  assert.equal(isUnlocked(st, units, 'b'), true);
   assert.equal(st.review['一'].due, '2026-09-28');
   assert.equal(dueReviews(st, '2026-09-28')[0].zh, '一');
 
   const good = { ...sum, firstTry: 2, accuracy: 1, missedKeys: [], clearedKeys: ['十'] };
   res = applyResult(st, { levelId: 'a', summary: good, items }, '2026-09-28');
   st = res.state;
-  assert.equal(res.gained.newStars, 3);
+  assert.equal(res.gained.newStars, 2);
   assert.equal(isUnlocked(st, units, 'b'), true);
   assert.equal(streak(st, '2026-09-28'), 2);
   assert.equal(streak(st, addDays('2026-09-28', 1)), 2);
