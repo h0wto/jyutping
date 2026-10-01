@@ -1,19 +1,39 @@
-// 进度、星级、XP、连续打卡和错题复习（Leitner 盒子）。纯函数，状态由调用方持久化。
+// 进度、星级、XP、连续打卡和错题本。纯函数，状态由调用方持久化。
+//
+// 评分标准：一个字「一次就打对」就算掌握，掌握了的字以后不再出现。
+//   ★    打完一关（错字也重新打对了）→ 解锁下一关
+//   ★★   本关掌握 80% 以上
+//   ★★★  本关全部掌握
+// 再练一关时只出还没掌握的字，所以把错字补对就能把星拿满。
 
 export const DAILY_GOAL_XP = 30;
-const REVIEW_GAPS = [1, 2, 4, 7, 15]; // 答对后下次复习间隔（天）
+export const TWO_STAR = 0.8;
 
 export function emptyState() {
   return {
-    version: 1,
-    stars: {},        // levelId -> 0..3（取最好成绩）
-    best: {},         // levelId -> { accuracy, spm }
+    version: 2,
+    stars: {},        // levelId -> 1..3（只升不降；有记录就代表打完过）
+    mastered: {},     // itemKey -> true：一次打对过
+    best: {},         // levelId -> { spm }
     xpByDay: {},      // 'YYYY-MM-DD' -> xp
-    review: {},       // itemKey -> { box, due, jp }
+    review: {},       // itemKey -> { due, jp }：错题本，一次打对就移除
     seenTraps: [],    // 已经弹过的陷阱卡
     trapHits: {},     // trapId -> 次数
-    settings: { lengthHint: false, sound: true, speak: false },
+    settings: { lengthHint: false, sound: true, speak: false, rubricClosed: false },
   };
+}
+
+// 旧存档（v1）没有 mastered：打完过的关卡里，不在错题本中的字视为已掌握。
+export function migrate(state, units) {
+  if (state.version >= 2) return state;
+  const next = { ...emptyState(), ...state, version: 2, mastered: { ...(state.mastered ?? {}) } };
+  next.settings = { ...emptyState().settings, ...state.settings };
+  for (const l of flatLevels(units)) {
+    if (!(state.stars?.[l.id] > 0)) continue;
+    for (const [zh] of l.items) if (!state.review?.[zh]) next.mastered[zh] = true;
+  }
+  for (const [key, r] of Object.entries(next.review)) next.review[key] = { due: r.due, jp: r.jp };
+  return next;
 }
 
 export function dayKey(date = new Date()) {
@@ -26,16 +46,27 @@ export function addDays(key, n) {
   return dayKey(new Date(y, m - 1, d + n));
 }
 
-// 错的字都要重打对才能结束一局，所以打完就算过关（至少 1 星），星数只看一次打对的比例。
-export function starsFor(accuracy) {
-  if (accuracy >= 0.97) return 3;
-  if (accuracy >= 0.9) return 2;
+export function mastery(state, level) {
+  const total = level.items.length;
+  const done = level.items.filter(([zh]) => state.mastered[zh]).length;
+  return { done, total, ratio: total ? done / total : 0 };
+}
+
+export function starsForMastery(ratio) {
+  if (ratio >= 1) return 3;
+  if (ratio >= TWO_STAR) return 2;
   return 1;
 }
 
-// 每个字首次打对 1 分，满连击奖励，过关再加。
-export function xpFor(summary, stars) {
-  return summary.firstTry + Math.floor(summary.maxCombo / 5) + (stars > 0 ? 5 : 2);
+// 本关还没掌握的字；全部掌握了就返回整关（自由练习）。
+export function itemsToPractice(state, level) {
+  const left = level.items.filter(([zh]) => !state.mastered[zh]);
+  return left.length ? left : level.items;
+}
+
+// 每个字一次打对 1 分，每 5 连击奖励 1 分，打完一局再加 5。
+export function xpFor(summary) {
+  return summary.firstTry + Math.floor(summary.maxCombo / 5) + 5;
 }
 
 // 连续打卡天数：今天还没练不算断，从昨天往回数。
@@ -53,7 +84,7 @@ export function flatLevels(units) {
   return units.flatMap((u) => u.levels.map((l) => ({ ...l, unit: u })));
 }
 
-// 第一关永远开放，之后每关要求上一关至少 1 星。
+// 第一关永远开放，之后每关要求上一关打完过。
 export function isUnlocked(state, units, levelId) {
   const all = flatLevels(units);
   const i = all.findIndex((l) => l.id === levelId);
@@ -67,39 +98,42 @@ export function nextLevel(state, units) {
 
 export function dueReviews(state, today = dayKey(), limit = 6) {
   return Object.entries(state.review)
-    .filter(([, r]) => r.due <= today)
-    .sort((a, b) => a[1].due.localeCompare(b[1].due) || a[1].box - b[1].box)
+    .filter(([key, r]) => r.due <= today && !state.mastered[key])
+    .sort((a, b) => a[1].due.localeCompare(b[1].due))
     .slice(0, limit)
     .map(([key, r]) => ({ key, zh: key, syls: r.jp.split(' '), review: true }));
 }
 
 // 一局结束后合并结果，返回新状态和本局获得的东西（用于结算页）。
-export function applyResult(state, { levelId, summary, items, trapHits = [] }, today = dayKey()) {
+// level 为 null 表示单独的复习局。
+export function applyResult(state, { level, summary, items, trapHits = [] }, today = dayKey()) {
   const next = structuredClone(state);
-  const stars = levelId ? starsFor(summary.accuracy) : 0;
-  const prevStars = levelId ? next.stars[levelId] ?? 0 : 0;
-  const prevBest = levelId ? next.best[levelId] : null;
-  if (levelId) {
-    next.stars[levelId] = Math.max(prevStars, stars);
-    next.best[levelId] = {
-      accuracy: Math.max(prevBest?.accuracy ?? 0, summary.accuracy),
-      spm: Math.max(prevBest?.spm ?? 0, summary.spm),
-    };
+  const byKey = Object.fromEntries(items.map((it) => [it.key, it]));
+
+  // 一次打对 → 掌握，从错题本移除，以后不再出；打错 → 进错题本，明天起混进练习。
+  for (const key of summary.clearedKeys) {
+    next.mastered[key] = true;
+    delete next.review[key];
   }
-  const xp = xpFor(summary, levelId ? stars : 1);
+  for (const key of summary.missedKeys) {
+    if (next.mastered[key]) continue; // 掌握过的字偶尔手滑不算
+    next.review[key] = { due: addDays(today, 1), jp: byKey[key].syls.join(' ') };
+  }
+
+  let stars = 0, prevStars = 0, prevBest = null, before = null, after = null;
+  if (level) {
+    before = mastery(state, level);
+    after = mastery(next, level);
+    prevStars = next.stars[level.id] ?? 0;
+    stars = Math.max(prevStars, starsForMastery(after.ratio));
+    next.stars[level.id] = stars;
+    prevBest = next.best[level.id] ?? null;
+    next.best[level.id] = { spm: Math.max(prevBest?.spm ?? 0, summary.spm) };
+  }
+
+  const xp = xpFor(summary);
   const hadToday = Boolean(next.xpByDay[today]);
   next.xpByDay[today] = (next.xpByDay[today] ?? 0) + xp;
-
-  const byKey = Object.fromEntries(items.map((it) => [it.key, it]));
-  for (const key of summary.missedKeys) {
-    next.review[key] = { box: 0, due: addDays(today, 1), jp: byKey[key].syls.join(' ') };
-  }
-  for (const key of summary.clearedKeys) {
-    const r = next.review[key];
-    if (!r || !byKey[key]?.review) continue;
-    if (r.box + 1 >= REVIEW_GAPS.length) delete next.review[key];
-    else next.review[key] = { ...r, box: r.box + 1, due: addDays(today, REVIEW_GAPS[r.box + 1]) };
-  }
   for (const id of trapHits) next.trapHits[id] = (next.trapHits[id] ?? 0) + 1;
 
   return {
@@ -108,7 +142,10 @@ export function applyResult(state, { levelId, summary, items, trapHits = [] }, t
       xp,
       stars,
       newStars: Math.max(0, stars - prevStars),
-      newSpmRecord: Boolean(prevBest) && summary.spm > prevBest.spm,
+      masteredBefore: before?.done ?? 0,
+      mastered: after?.done ?? 0,
+      levelTotal: after?.total ?? 0,
+      newSpmRecord: Boolean(prevBest?.spm) && summary.spm > prevBest.spm,
       streakStarted: !hadToday,
       streak: streak(next, today),
       goalReached: (state.xpByDay[today] ?? 0) < DAILY_GOAL_XP && next.xpByDay[today] >= DAILY_GOAL_XP,

@@ -3,6 +3,7 @@ import { TRAPS } from './core/traps.js';
 import { createSession, submit, summary, current, progress, toItem, isDone } from './core/session.js';
 import {
   emptyState, applyResult, streak, dayKey, addDays, isUnlocked, nextLevel, dueReviews, flatLevels, DAILY_GOAL_XP,
+  migrate, mastery, itemsToPractice, TWO_STAR,
 } from './core/progress.js';
 import { sfx, unlockAudio, setSound, speak, confetti, vibrate } from './ui/fx.js';
 
@@ -14,7 +15,7 @@ const LEVELS = flatLevels(UNITS);
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return { ...emptyState(), ...JSON.parse(raw) };
+    if (raw) return migrate({ ...emptyState(), version: 1, ...JSON.parse(raw) }, UNITS);
   } catch {}
   return emptyState();
 }
@@ -53,12 +54,6 @@ const totalStars = () => Object.values(state.stars).reduce((a, b) => a + b, 0);
 
 const PRAISE = ['好嘢！', '正！', '叻！', '啱晒！', '得咗！', '犀利！'];
 const COMBO_WORDS = { 5: '手感嚟咗 🔥', 10: '勁過火 🔥🔥', 20: '無得頂 🚀', 30: '打字機上身 ⌨️' };
-const RESULT_TITLES = [
-  ['差少少，再嚟過！', '错的字已经记进复习本'],
-  ['過關！', '下一站已经开通'],
-  ['好叻！', '准确率 90% 以上'],
-  ['冇得彈！', '几乎全对，完美一站'],
-];
 
 function trapCard(id, kicker, cls = '') {
   const t = TRAPS[id];
@@ -104,6 +99,7 @@ function renderHome() {
         ${cls === 'current' ? '<div class="bubble">下一站</div>' : ''}
         <button class="stop-btn" data-level="${l.id}" ${open ? '' : 'disabled'} aria-label="第 ${li + 1} 关">${open ? li + 1 : '🔒'}</button>
         <div class="stars">${open ? starText(s) : ''}</div>
+        ${s > 0 ? `<div class="mastery">${mastery(state, l).done}/${l.items.length}</div>` : ''}
       </div>`;
     }).join('');
     return `<section class="unit ${unlocked ? '' : 'locked'}">
@@ -134,6 +130,15 @@ function renderHome() {
       <button class="link" data-go="discard">放弃这一局</button></div>` : ''}
     <div class="cta"><button class="btn ${run ? 'ghost' : ''}" data-go="daily">开始今日练习 <small>· ${esc(next.unit.title)} 第 ${levelNo(next)} 关</small></button></div>
     <p class="cta-sub">${due ? `另有 ${due} 个错字到期复习，会混在这局里` : '每局约 5 分钟 · 打完一个音节按空格'}</p>
+    <details class="rubric" ${state.settings.rubricClosed ? '' : 'open'}>
+      <summary>⭐ 评分标准：星星怎么拿？</summary>
+      <ul>
+        <li><span class="st">★</span><div><b>打完一关</b>（打错的字重新打对也算）<br>解锁下一关</div></li>
+        <li><span class="st">★★</span><div><b>本关掌握 ${Math.round(TWO_STAR * 100)}% 以上</b></div></li>
+        <li><span class="st">★★★</span><div><b>本关全部掌握</b></div></li>
+      </ul>
+      <p><b>掌握</b> = 一个字一次就打对。掌握了的字以后不会再出；再点这一关，只会考你还没掌握的字，补对了星星就往上加。关卡下面的「12/15」就是掌握了几个。</p>
+    </details>
     ${due > 6 ? `<button class="btn ghost" data-go="review">只练复习（${due}）</button>` : ''}
     ${unitsHtml}
     <div class="footer-links">
@@ -143,6 +148,10 @@ function renderHome() {
 
   app.querySelector('[data-go="daily"]').onclick = () => startLevel(next, true);
   app.querySelector('[data-go="review"]')?.addEventListener('click', startReview);
+  app.querySelector('.rubric').addEventListener('toggle', (e) => {
+    state.settings.rubricClosed = !e.target.open;
+    save();
+  });
   app.querySelector('[data-go="resume"]')?.addEventListener('click', () => { unlockAudio(); resumeRun(run); });
   app.querySelector('[data-go="discard"]')?.addEventListener('click', () => { clearRun(); renderHome(); });
   app.querySelector('[data-go="rules"]').onclick = renderRules;
@@ -171,7 +180,7 @@ function renderIntro(unit, onStart) {
 // ---------- 开局 ----------
 function startLevel(level, withReviews) {
   unlockAudio();
-  const items = level.items.map((it) => toItem(it));
+  const items = itemsToPractice(state, level).map((it) => toItem(it));
   if (withReviews && level.unit.mode !== 'ime') {
     const reviews = dueReviews(state).filter((r) => !items.some((i) => i.key === r.key));
     reviews.forEach((r, i) => items.splice(Math.min(items.length, 2 + i * 3), 0, r));
@@ -263,7 +272,7 @@ function play({ items, mode, level, resume = null }) {
     comboEl.textContent = s.combo >= 2 ? `🔥 ${s.combo}` : '';
     comboEl.classList.toggle('hot', s.combo >= 5);
     const tag = stage.querySelector('.tag');
-    tag.textContent = it.retry ? '再嚟一次' : it.review ? '复习' : mode === 'ime' ? '实战 · 用粤拼键盘' : level ? `${level.unit.title} · 第 ${levelNo(level)} 关` : '复习';
+    tag.textContent = it.retry ? '再嚟一次' : it.review ? '复习' : mode === 'ime' ? '实战 · 用粤拼键盘' : level ? `${level.unit.title} · 第 ${levelNo(level)} 关${s.total < level.items.length ? ' · 只练错字' : ''}` : '复习';
     tag.className = `tag ${it.retry || it.review ? 'review' : ''}`;
 
     const cols = stage.querySelector('.cols');
@@ -363,7 +372,7 @@ function play({ items, mode, level, resume = null }) {
 
   function finish() {
     const sum = summary(s);
-    const res = applyResult(state, { levelId: level?.id ?? null, summary: sum, items, trapHits }, dayKey());
+    const res = applyResult(state, { level, summary: sum, items, trapHits }, dayKey());
     state = res.state;
     save();
     clearRun();
@@ -377,11 +386,17 @@ function play({ items, mode, level, resume = null }) {
 
 // ---------- 结算 ----------
 function renderResult({ sum, gained, level, items }) {
-  const stars = level ? gained.stars : Math.max(1, gained.stars);
-  const [title, lead] = level ? RESULT_TITLES[stars] : ['复习完成！', '错字会按间隔再出现，直到记牢'];
+  const stars = gained.stars;
+  const left = gained.levelTotal - gained.mastered;
+  const toTwo = Math.ceil(gained.levelTotal * TWO_STAR) - gained.mastered;
+  const [title, lead] = !level ? ['复习完成！', '打对的字已经移出错题本']
+    : stars >= 3 ? ['冇得彈！', '本关全部掌握']
+    : stars === 2 ? ['好叻！', `再补对 ${left} 个字就三星`]
+    : ['過關！', `下一关已经开通 · 再补对 ${Math.max(1, toTwo)} 个字就两星`];
   const missed = [...new Set(sum.missedKeys)].map((k) => items.find((i) => i.key === k)).filter(Boolean);
   const nextLv = level ? nextLevel(state, UNITS) : null;
   const badges = [];
+  if (level && gained.mastered > gained.masteredBefore) badges.push(['✅', `这局新掌握 ${gained.mastered - gained.masteredBefore} 个字`, false]);
   if (gained.goalReached) badges.push(['🎯', '今日目标完成！', true]);
   if (gained.streakStarted) badges.push(['🔥', gained.streak > 1 ? `连续 ${gained.streak} 日！` : '连胜开始！明天再嚟', true]);
   if (gained.newSpmRecord) badges.push(['⚡', `速度新纪录：每分钟 ${sum.spm} 个音节`, true]);
@@ -394,15 +409,16 @@ function renderResult({ sum, gained, level, items }) {
       <h1>${esc(title)}</h1>
       <p class="lead">${esc(lead)}</p>
       <div class="stats">
-        <div class="stat"><b>${Math.round(sum.accuracy * 100)}%</b><small>一次打对</small></div>
+        ${level ? `<div class="stat"><b>${gained.mastered}/${gained.levelTotal}</b><small>本关掌握</small></div>`
+          : `<div class="stat"><b>${Math.round(sum.accuracy * 100)}%</b><small>一次打对</small></div>`}
         <div class="stat"><b>${sum.spm}</b><small>音节/分钟</small></div>
         <div class="stat xp"><b data-count="${gained.xp}">+0</b><small>XP</small></div>
       </div>
       <div class="badges">${badges.map(([em, t, gold], i) => `<div class="badge ${gold ? 'gold' : ''}" style="animation-delay:${1 + i * 0.2}s"><span class="em">${em}</span>${esc(t)}</div>`).join('')}</div>
-      ${missed.length ? `<div class="missed"><h4>要留意嘅字（已加入复习）</h4><div class="ex">${missed.map((it) => `<span>${esc(it.zh)}<code>${esc(it.syls.join(' '))}</code></span>`).join('')}</div></div>` : ''}
+      ${missed.length ? `<div class="missed"><h4>未掌握嘅字（再练这关只考佢哋，明天亦会混入练习）</h4><div class="ex">${missed.map((it) => `<span>${esc(it.zh)}<code>${esc(it.syls.join(' '))}</code></span>`).join('')}</div></div>` : ''}
       <div class="actions">
-        ${level && stars > 0 && nextLv && nextLv.id !== level.id ? `<button class="btn" data-next>下一站：${esc(nextLv.unit.title)} 第 ${levelNo(nextLv)} 关</button>` : ''}
-        ${level ? `<button class="btn ${stars > 0 ? 'ghost' : ''}" data-again>${stars > 0 ? '再练一次，冲更多星' : '再嚟一次'}</button>` : ''}
+        ${level && nextLv && nextLv.id !== level.id ? `<button class="btn" data-next>下一站：${esc(nextLv.unit.title)} 第 ${levelNo(nextLv)} 关</button>` : ''}
+        ${level && left > 0 ? `<button class="btn ghost" data-again>只练错的 ${left} 个字，冲 ${stars + 1} 星</button>` : ''}
         <button class="btn ghost" data-home>返回路线图</button>
       </div>
     </div>`;

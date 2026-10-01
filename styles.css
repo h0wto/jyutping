@@ -130,6 +130,17 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 .stars b { color: var(--gold); font-weight: 400; }
 @keyframes bob { 50% { transform: translateY(-4px); } }
 
+.stop .mastery { font-size: 11px; font-weight: 800; color: var(--ink-soft); font-variant-numeric: tabular-nums; margin-top: -2px; }
+.rubric { background: var(--card); border: 2px solid var(--line); border-radius: var(--radius); padding: 0 14px; margin-bottom: 4px; }
+.rubric summary { cursor: pointer; font-weight: 800; padding: 12px 0; list-style: none; }
+.rubric summary::-webkit-details-marker { display: none; }
+.rubric summary::after { content: "展开"; float: right; font-size: 13px; color: var(--ink-soft); font-weight: 600; }
+.rubric[open] summary::after { content: "收起"; }
+.rubric ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rubric li { display: grid; grid-template-columns: 56px 1fr; align-items: center; font-size: 14px; line-height: 1.4; }
+.rubric .st { color: var(--gold); font-size: 16px; letter-spacing: 1px; }
+.rubric p { font-size: 13px; color: var(--ink-soft); line-height: 1.6; margin: 10px 0 14px; }
+.rubric p b { color: var(--ink); }
 .footer-links { display: flex; gap: 10px; margin-top: 30px; }
 
 /* ---------- 练习 ---------- */
