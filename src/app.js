@@ -131,7 +131,7 @@ function renderHome() {
     ${run ? `<div class="cta"><button class="btn" data-go="resume">继续上次 <small>· ${runLevel ? `${esc(runLevel.unit.title)} 第 ${levelNo(runLevel)} 关` : '复习'} · ${Math.round(progress(run.s) * run.s.total)}/${run.s.total}</small></button>
       <button class="link" data-go="discard">放弃这一局</button></div>` : ''}
     <div class="cta"><button class="btn ${run ? 'ghost' : ''}" data-go="daily">开始今日练习 <small>· ${esc(next.unit.title)} 第 ${levelNo(next)} 关</small></button></div>
-    <p class="cta-sub">${due ? `另有 ${due} 个错字到期复习，会混在这局里` : '每局约 5 分钟 · 打完一个音节按空格'}</p>
+    <p class="cta-sub">${due ? `另有 ${due} 个错字到期复习，会混在这局里` : '每局约 2 分钟 · 打完一个音节按空格'}</p>
     <details class="rubric" ${state.settings.rubricClosed ? '' : 'open'}>
       <summary>⭐ 评分标准：星星怎么拿？</summary>
       <ul>

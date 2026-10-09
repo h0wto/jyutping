@@ -31,3 +31,22 @@ test('每一关都能用标准答案一次打通', () => {
     }
   }
 });
+
+test('不重复练同一个音：每题都带来新音节，每个音节最多出现在 4 道题里', () => {
+  const seen = new Set();
+  const uses = new Map();
+  for (const u of UNITS) {
+    if (u.mode === 'ime') continue; // 实战关本来就是拿学过的音拼整句
+    for (const l of u.levels) {
+      for (const [zh, jp] of l.items) {
+        const syls = [...new Set(jp.split(' '))];
+        assert.ok(syls.some((s) => !seen.has(s)), `${l.id} ${zh} 的音节之前都打过了`);
+        for (const s of syls) {
+          seen.add(s);
+          uses.set(s, (uses.get(s) ?? 0) + 1);
+          assert.ok(uses.get(s) <= 4, `${s} 出现太多次了`);
+        }
+      }
+    }
+  }
+});
